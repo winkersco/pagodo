@@ -9,6 +9,7 @@ import sys
 import time
 
 # Third party Python libraries.
+from urllib.error import HTTPError
 import numpy
 
 # google == 2.0.1, module author changed import name to googlesearch
@@ -50,106 +51,113 @@ class Pagodo:
 
         # Initialize starting dork number.
         i = 1
+        flag_retry = True
 
         for dork in self.google_dorks:
-            try:
-                dork = dork.strip()
+            while flag_retry:
+                try:
+                    dork = dork.strip()
 
-                # Stores URLs with files, clear out for each dork.
-                self.links = []
+                    # Stores URLs with files, clear out for each dork.
+                    self.links = []
 
-                # Search for the links to collect.
-                if self.domain:
-                    # site: must be at the beginning of the query.
-                    query = f"site:{self.domain} {dork}"
-                else:
-                    query = dork
+                    # Search for the links to collect.
+                    if self.domain:
+                        # site: must be at the beginning of the query.
+                        query = f"site:{self.domain} {dork}"
+                    else:
+                        query = dork
 
-                """
-                Google search web GUI message for large search string queries:
-                    "the" (and any subsequent words) was ignored because we limit queries to 32 words.
-                """
-                # Search string is longer than 32 words.
-                if len(query.split(" ")) > 32:
-                    ignored_string = " ".join(query.split(" ")[32:])
+                    """
+                    Google search web GUI message for large search string queries:
+                        "the" (and any subsequent words) was ignored because we limit queries to 32 words.
+                    """
+                    # Search string is longer than 32 words.
+                    if len(query.split(" ")) > 32:
+                        ignored_string = " ".join(query.split(" ")[32:])
+                        print(
+                            "[!] Google limits queries to 32 words (separated by spaces):  Removing from search query: "
+                            f"'{ignored_string}'"
+                        )
+
+                        # Update query variable.
+                        updated_query = " ".join(query.split(" ")[0:32])
+
+                        # If original query is in quotes, append a double quote to new truncated updated_query.
+                        if query.endswith('"'):
+                            updated_query = f'{updated_query}"'
+
+                        print(f"[*] New search query: {updated_query}")
+
+                    pause_time = self.delay + random.choice(self.jitter)
+
+                    # Determine User-Agent based off user preference.
+                    if self.randomize_user_agent is False:
+                        user_agent = None
+                    else:
+                        user_agent = random.choice(self.random_user_agents).strip()
+
                     print(
-                        "[!] Google limits queries to 32 words (separated by spaces):  Removing from search query: "
-                        f"'{ignored_string}'"
+                        f"[*] Search ( {i} / {len(self.google_dorks)} ) for Google dork [ {query} ] and waiting "
+                        f"{pause_time} seconds between searches using User-Agent '{user_agent}'"
                     )
 
-                    # Update query variable.
-                    updated_query = " ".join(query.split(" ")[0:32])
+                    for url in googlesearch.search(
+                        query,
+                        start=0,
+                        stop=self.search_max,
+                        num=100,
+                        pause=pause_time,
+                        extra_params={"filter": "0"},
+                        user_agent=user_agent,
+                        tbs="li:1",  # Verbatim mode.  Doesn't return suggested results with other domains.
+                    ):
+                        # Ignore results from exploit-db.com hosting the actual dorks.  Keeping it simple with regex.
+                        if re.search("https://www.exploit-db.com/ghdb", url, re.IGNORECASE):
+                            continue
+                        else:
+                            self.links.append(url)
 
-                    # If original query is in quotes, append a double quote to new truncated updated_query.
-                    if query.endswith('"'):
-                        updated_query = f'{updated_query}"'
+                    # Since googlesearch.search method retrieves URLs in batches of 100, ensure the file list only contains
+                    # the requested amount.
+                    if len(self.links) > self.search_max:
+                        self.links = self.links[: -(len(self.links) - self.search_max)]
 
-                    print(f"[*] New search query: {updated_query}")
+                    print(f"[*] Results: {len(self.links)} sites found for Google dork: {dork}")
 
-                pause_time = self.delay + random.choice(self.jitter)
+                    for found_dork in self.links:
+                        print(found_dork)
 
-                # Determine User-Agent based off user preference.
-                if self.randomize_user_agent is False:
-                    user_agent = None
-                else:
-                    user_agent = random.choice(self.random_user_agents).strip()
+                    self.total_dorks += len(self.links)
 
-                print(
-                    f"[*] Search ( {i} / {len(self.google_dorks)} ) for Google dork [ {query} ] and waiting "
-                    f"{pause_time} seconds between searches using User-Agent '{user_agent}'"
-                )
+                    # Only save links with valid results to an output file.
+                    if self.save_links and (self.links):
+                        with open(self.log_file, "a") as fh:
+                            fh.write(f"#: {dork}\n")
+                            for link in self.links:
+                                fh.write(f"{link}\n")
+                            fh.write("=" * 50 + "\n")
 
-                for url in googlesearch.search(
-                    query,
-                    start=0,
-                    stop=self.search_max,
-                    num=100,
-                    pause=pause_time,
-                    extra_params={"filter": "0"},
-                    user_agent=user_agent,
-                    tbs="li:1",  # Verbatim mode.  Doesn't return suggested results with other domains.
-                ):
-                    # Ignore results from exploit-db.com hosting the actual dorks.  Keeping it simple with regex.
-                    if re.search("https://www.exploit-db.com/ghdb", url, re.IGNORECASE):
-                        continue
-                    else:
-                        self.links.append(url)
+                    flag_retry = False
 
-                # Since googlesearch.search method retrieves URLs in batches of 100, ensure the file list only contains
-                # the requested amount.
-                if len(self.links) > self.search_max:
-                    self.links = self.links[: -(len(self.links) - self.search_max)]
+                except KeyboardInterrupt:
+                    sys.exit(0)
 
-                print(f"[*] Results: {len(self.links)} sites found for Google dork: {dork}")
-
-                for found_dork in self.links:
-                    print(found_dork)
-
-                self.total_dorks += len(self.links)
-
-                # Only save links with valid results to an output file.
-                if self.save_links and (self.links):
-                    with open(self.log_file, "a") as fh:
-                        fh.write(f"#: {dork}\n")
-                        for link in self.links:
-                            fh.write(f"{link}\n")
-                        fh.write("=" * 50 + "\n")
-
-            except KeyboardInterrupt:
-                sys.exit(0)
-
-            except Exception as e:
-                print(f"[-] Error with dork: {dork}")
-                print(f"[-] EXCEPTION: {e}")
-                if e.code == 429:
+                except HTTPError as e:
+                    print(f"[-] Error with dork: {dork}")
+                    print(f"[-] HTTPError: {e}")
                     print(
                         "[*] Google is blocking you, looks like you need to spread out the Google searches.  Don't know "
                         "how to utilize SSH and dynamic socks proxies?  Do yourself a favor and pick up a copy of The "
                         "Cyber Plumber's Handbook and interactive lab (https://gumroad.com/l/cph_book_and_lab) to "
                         "learn all about Secure Shell (SSH) tunneling, port redirection, and bending traffic like a boss."
                     )
+                except Exception as e:
+                    print(f"[-] Error with dork: {dork}")
+                    print(f"[-] Exception: {e}")
 
             i += 1
+            flag_retry = True
 
         self.fp.close
 
