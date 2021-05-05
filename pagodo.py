@@ -22,7 +22,7 @@ import googlesearch  # noqa
 class Pagodo:
     """pagodo class object"""
 
-    def __init__(self, domain, google_dorks, search_max, save_links, delay, jitter, randomize_user_agent):
+    def __init__(self, domain, google_dorks, search_max, save_links, delay, retry, jitter, randomize_user_agent):
         """Initialize Pagodo class object."""
 
         self.domain = domain
@@ -33,6 +33,7 @@ class Pagodo:
         if save_links:
             self.log_file = f"pagodo_results_{get_timestamp()}.txt"
         self.delay = delay
+        self.retry = retry
 
         # Create an array of jitter values to add to delay, favoring longer search times.
         self.jitter = numpy.random.uniform(low=self.delay, high=jitter * self.delay, size=(50,))
@@ -116,7 +117,13 @@ class Pagodo:
                         if re.search("https://www.exploit-db.com/ghdb", url, re.IGNORECASE):
                             continue
                         else:
-                            self.links.append(url)
+                            domain_search = re.search('https?://([A-Za-z_0-9.-]+).*', url)
+                            if domain_search:
+                                url = domain_search.group(1)
+                                if url in self.links:
+                                    continue
+                                else:
+                                    self.links.append(url)
 
                     # Since googlesearch.search method retrieves URLs in batches of 100, ensure the file list only contains
                     # the requested amount.
@@ -152,6 +159,7 @@ class Pagodo:
                         "Cyber Plumber's Handbook and interactive lab (https://gumroad.com/l/cph_book_and_lab) to "
                         "learn all about Secure Shell (SSH) tunneling, port redirection, and bending traffic like a boss."
                     )
+                    sleep_and_retry(self.retry)
                 except Exception as e:
                     print(f"[-] Error with dork: {dork}")
                     print(f"[-] Exception: {e}")
@@ -171,6 +179,15 @@ def get_timestamp():
     timestamp = time.strftime("%Y%m%d_%H%M%S", now)
 
     return timestamp
+
+
+def sleep_and_retry(seconds):
+    """Pause For specific seconds and retry."""
+
+    for i in range(seconds + 1):
+        if (i % 10) == 0:
+            print(f"[*] Retry in {seconds - i} seconds.")
+        time.sleep(1)
 
 
 if __name__ == "__main__":
@@ -211,6 +228,15 @@ if __name__ == "__main__":
         Default: 37.0""",
     )
     parser.add_argument(
+        "-r",
+        dest="retry",
+        action="store",
+        type=int,
+        default=60,
+        help="""sleep (in seconds) to retry when Google block your IP.
+        Default: 60""",
+    )
+    parser.add_argument(
         "-u",
         dest="randomize_user_agent",
         action="store_false",
@@ -227,6 +253,10 @@ if __name__ == "__main__":
 
     if args.delay < 0:
         print("[!] Delay must be greater than 0")
+        sys.exit(0)
+
+    if args.retry < 0:
+        print("[!] Sleep when blocking must be greater than 0")
         sys.exit(0)
 
     print(f"[*] Initiation timestamp: {get_timestamp()}")
